@@ -188,38 +188,106 @@ async function loadData() {
 
   let startDate = document.getElementById("startDate").value;
   let endDate = document.getElementById("endDate").value;
+  let statusFilter = document.getElementById("statusFilter").value;
 
   if (!startDate || !endDate) {
     alert("Select date first");
     return;
   }
 
-  let { data } = await supabaseClient.from("orders").select("*");
+  let query = supabaseClient.from("orders").select("*");
+
+  // FILTER STATUS
+  if (statusFilter === "Selesai") {
+    query = query.eq("status", "Selesai");
+  }
+  if (statusFilter === "pending") {
+    query = query.neq("status", "Selesai").neq("status", "Cancel");
+  }
+  if (statusFilter === "Cancel") {
+    query = query.eq("status", "Cancel");
+  }
+
+  // FILTER DATE
+  query = query.gte("order_date", startDate).lte("order_date", endDate);
+
+  let { data, error } = await query;
+
+  if (error) {
+    alert(error.message);
+    return;
+  }
 
   let tbody = document.querySelector("#table tbody");
   tbody.innerHTML = "";
 
-  data.forEach(r => {
-    let tr = document.createElement("tr");
+  let grouped = {};
+  let counted = new Set();
 
-    if (r.is_estimated) tr.classList.add("estimated");
-    else tr.classList.add("completed");
+  let totalInitial = 0;
+  let totalDeducted = 0;
+  let totalFee = 0;
+  let totalNet = 0;
 
-    tr.innerHTML = `
-      <td>${r.order_date}</td>
-      <td>${r.order_id}</td>
-      <td>${r.status}</td>
-      <td>${r.product_name}</td>
-      <td>${r.variant}</td>
-      <td>${r.sku}</td>
-      <td>${formatNumber(r.initial_price)}</td>
-      <td>${formatNumber(r.deducted)}</td>
-      <td>${formatNumber(r.shopee_fee)}</td>
-      <td>${formatNumber(r.net_income)}</td>
-    `;
-
-    tbody.appendChild(tr);
+  // ===== GROUPING =====
+  data.forEach(row => {
+    if (!grouped[row.order_id]) grouped[row.order_id] = [];
+    grouped[row.order_id].push(row);
   });
+
+  // ===== RENDER =====
+  for (let order_id in grouped) {
+    let rows = grouped[order_id];
+
+    rows.forEach((r, i) => {
+      let tr = document.createElement("tr");
+
+      // COLOR
+      if (r.status !== "Cancel") {
+        if (r.is_estimated) tr.classList.add("estimated");
+        else tr.classList.add("completed");
+      }
+
+      totalInitial += r.initial_price;
+
+      if (!counted.has(order_id)) {
+        totalDeducted += r.deducted || 0;
+        totalFee += r.shopee_fee || 0;
+        totalNet += r.net_income || 0;
+        counted.add(order_id);
+      }
+
+      tr.innerHTML = `
+        <td>${i==0 ? r.order_date : ""}</td>
+        <td>${i==0 ? r.order_id : ""}</td>
+        <td>${i==0 ? r.status : ""}</td>
+        <td>${r.product_name}</td>
+        <td>${r.variant}</td>
+        <td>${r.sku}</td>
+        <td>${formatNumber(r.initial_price)}</td>
+        <td>${i==0 && r.status !== "Cancel" ? formatNumber(r.deducted) : ""}</td>
+        <td>${i==0 && r.status !== "Cancel" ? formatNumber(r.shopee_fee) : ""}</td>
+        <td>${i==0 && r.status !== "Cancel" ? formatNumber(r.net_income) : ""}</td>
+      `;
+
+      tbody.appendChild(tr);
+    });
+  }
+
+  // ===== TOTAL ROW =====
+  let totalRow = document.createElement("tr");
+  totalRow.style.fontWeight = "bold";
+  totalRow.style.background = "#e9ecef";
+
+  totalRow.innerHTML = `
+    <td colspan="6">TOTAL</td>
+    <td>${formatNumber(totalInitial)}</td>
+    <td>${formatNumber(totalDeducted)}</td>
+    <td>${formatNumber(totalFee)}</td>
+    <td>${formatNumber(totalNet)}</td>
+  `;
+
+  tbody.appendChild(totalRow);
 }
 
 // ===== EXPORT EXCEL =====
