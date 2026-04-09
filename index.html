@@ -68,6 +68,20 @@ const supabaseClient = createClient(
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRuZGt2dHl2ZnBwb3dxeHBobnh2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3MDE3MTMsImV4cCI6MjA5MTI3NzcxM30.wy8qeC3iQHSMmD7Au7IKmqhO3Mv7iZmX6IOpPE7JpBc"
 );
 
+// ===== NUMBER PARSER (IMPORTANT FIX) =====
+function parseNumber(val) {
+  if (!val) return 0;
+  val = val.toString();
+  val = val.replace(/\./g, ""); // remove thousand dot
+  val = val.replace(",", "."); // decimal comma → dot
+  return parseFloat(val) || 0;
+}
+
+// ===== FORMAT NUMBER =====
+function formatNumber(num) {
+  return (num || 0).toLocaleString("id-ID");
+}
+
 // ===== FEE FUNCTION =====
 function calculateFee(base) {
   let admin = base * 0.117;
@@ -95,14 +109,16 @@ async function uploadOrder() {
     for (let r of rows) {
       let order_id = r["No. Pesanan"];
 
-      let initial = (r["Harga Awal"] || 0) * (r["Jumlah"] || 1);
+      let price = parseNumber(r["Harga Awal"]);
+      let qty = parseNumber(r["Jumlah"]);
+      let initial = price * qty;
 
       let deducted =
-        (r["Voucher disponsor oleh Penjual"] || 0) +
-        (r["Voucher co-fund disponsor oleh Penjual"] || 0) +
-        (r["Cashback Koin disponsori Penjual"] || 0) +
-        (r["Cashback Koin Co-fund disponsori Penjual"] || 0) +
-        (r["Promo Gratis Ongkir dari Penjual"] || 0);
+        parseNumber(r["Voucher disponsor oleh Penjual"]) +
+        parseNumber(r["Voucher co-fund disponsor oleh Penjual"]) +
+        parseNumber(r["Cashback Koin disponsori Penjual"]) +
+        parseNumber(r["Cashback Koin Co-fund disponsori Penjual"]) +
+        parseNumber(r["Promo Gratis Ongkir dari Penjual"]);
 
       let base = initial - deducted;
       let fee = calculateFee(base);
@@ -115,7 +131,7 @@ async function uploadOrder() {
         product_name: r["Nama Produk"],
         variant: r["Nama Variasi"],
         sku: r["Nomor Referensi SKU"],
-        qty: r["Jumlah"],
+        qty,
         initial_price: initial,
         deducted,
         shopee_fee: fee,
@@ -151,8 +167,8 @@ async function uploadIncome() {
       await supabaseClient
         .from("orders")
         .update({
-          shopee_fee: r["Biaya Administrasi (termasuk PPN 11%)"] || 0,
-          net_income: r["Dana Diterima"] || 0,
+          shopee_fee: parseNumber(r["Biaya Administrasi (termasuk PPN 11%)"]),
+          net_income: parseNumber(r["Dana Diterima"]),
           is_estimated: false
         })
         .eq("order_id", r["No. Pesanan"]);
@@ -210,10 +226,10 @@ async function loadData() {
         <td>${r.product_name}</td>
         <td>${r.variant}</td>
         <td>${r.sku}</td>
-        <td>${r.initial_price}</td>
-        <td>${i==0 ? r.deducted : ""}</td>
-        <td>${i==0 ? r.shopee_fee : ""}</td>
-        <td>${i==0 ? r.net_income : ""}</td>
+        <td>${formatNumber(r.initial_price)}</td>
+        <td>${i==0 ? formatNumber(r.deducted) : ""}</td>
+        <td>${i==0 ? formatNumber(r.shopee_fee) : ""}</td>
+        <td>${i==0 ? formatNumber(r.net_income) : ""}</td>
       `;
 
       tbody.appendChild(tr);
@@ -226,10 +242,10 @@ async function loadData() {
 
   totalRow.innerHTML = `
     <td colspan="6">TOTAL</td>
-    <td>${totalInitial}</td>
-    <td>${totalDeducted}</td>
-    <td>${totalFee}</td>
-    <td>${totalNet}</td>
+    <td>${formatNumber(totalInitial)}</td>
+    <td>${formatNumber(totalDeducted)}</td>
+    <td>${formatNumber(totalFee)}</td>
+    <td>${formatNumber(totalNet)}</td>
   `;
 
   tbody.appendChild(totalRow);
