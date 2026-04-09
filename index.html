@@ -10,6 +10,7 @@
     table { border-collapse: collapse; width: 100%; }
     td, th { border: 1px solid #ccc; padding: 6px; }
     .estimated { background-color: #fff3cd; }
+    .completed { background-color: #d4edda; }
   </style>
 </head>
 
@@ -40,6 +41,7 @@
 <input type="date" id="endDate">
 
 <button onclick="loadData()">View Report</button>
+<button onclick="exportToExcel()">Export to Excel</button>
 
 <hr>
 
@@ -66,18 +68,17 @@ const { createClient } = supabase;
 
 const supabaseClient = createClient(
   "https://tndkvtyvfppowqxphnxv.supabase.co",
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRuZGt2dHl2ZnBwb3dxeHBobnh2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3MDE3MTMsImV4cCI6MjA5MTI3NzcxM30.wy8qeC3iQHSMmD7Au7IKmqhO3Mv7iZmX6IOpPE7JpBc"
+  "YOUR_ANON_KEY_HERE"
 );
 
 // ===== PARSE NUMBER =====
 function parseNumber(val) {
-  if (val === null || val === undefined || val === "") return 0;
+  if (!val) return 0;
   if (typeof val === "number") return val;
 
   val = val.toString().trim();
   val = val.replace(/\./g, "");
   val = val.replace(",", ".");
-
   return parseFloat(val) || 0;
 }
 
@@ -101,8 +102,7 @@ async function uploadOrder() {
     const file = document.getElementById("fileInput").files[0];
     if (!file) return alert("Select file first");
 
-    const data = await file.arrayBuffer();
-    const wb = XLSX.read(data);
+    const wb = XLSX.read(await file.arrayBuffer());
     const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
 
     if (!rows[0]["Nama Produk"]) {
@@ -111,9 +111,7 @@ async function uploadOrder() {
     }
 
     for (let r of rows) {
-      let order_id = r["No. Pesanan"];
 
-      // ===== STATUS LOGIC (IMPORTANT) =====
       let status = r["Status Pesanan"];
       let cancelStatus = r["Status Pembatalan/ Pengembalian"];
 
@@ -137,7 +135,7 @@ async function uploadOrder() {
       let net = base - fee;
 
       await supabaseClient.from("orders").upsert({
-        order_id,
+        order_id: r["No. Pesanan"],
         order_date: r["Waktu Pesanan Dibuat"],
         status,
         product_name: r["Nama Produk"],
@@ -156,7 +154,7 @@ async function uploadOrder() {
     loadData();
 
   } catch (err) {
-    alert("Error: " + err.message);
+    alert(err.message);
   }
 }
 
@@ -166,8 +164,7 @@ async function uploadIncome() {
     const file = document.getElementById("fileInput").files[0];
     if (!file) return alert("Select file first");
 
-    const data = await file.arrayBuffer();
-    const wb = XLSX.read(data);
+    const wb = XLSX.read(await file.arrayBuffer());
     const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
 
     if (!rows[0]["Dana Diterima"]) {
@@ -190,11 +187,11 @@ async function uploadIncome() {
     loadData();
 
   } catch (err) {
-    alert("Error: " + err.message);
+    alert(err.message);
   }
 }
 
-// ===== LOAD DATA WITH FILTER =====
+// ===== LOAD DATA =====
 async function loadData() {
 
   let statusFilter = document.getElementById("statusFilter").value;
@@ -203,7 +200,6 @@ async function loadData() {
 
   let query = supabaseClient.from("orders").select("*");
 
-  // ===== STATUS FILTER =====
   if (statusFilter === "Selesai") {
     query = query.eq("status", "Selesai");
   }
@@ -216,14 +212,8 @@ async function loadData() {
     query = query.eq("status", "Cancel");
   }
 
-  // ===== DATE FILTER =====
-  if (startDate) {
-    query = query.gte("order_date", startDate);
-  }
-
-  if (endDate) {
-    query = query.lte("order_date", endDate);
-  }
+  if (startDate) query = query.gte("order_date", startDate);
+  if (endDate) query = query.lte("order_date", endDate);
 
   let { data } = await query;
 
@@ -233,10 +223,7 @@ async function loadData() {
   let grouped = {};
   let counted = new Set();
 
-  let totalInitial = 0;
-  let totalDeducted = 0;
-  let totalFee = 0;
-  let totalNet = 0;
+  let totalInitial = 0, totalDeducted = 0, totalFee = 0, totalNet = 0;
 
   data.forEach(row => {
     if (!grouped[row.order_id]) grouped[row.order_id] = [];
@@ -249,7 +236,11 @@ async function loadData() {
     rows.forEach((r, i) => {
       let tr = document.createElement("tr");
 
-      if (r.is_estimated) tr.classList.add("estimated");
+      // COLOR LOGIC
+      if (r.status !== "Cancel") {
+        if (r.is_estimated) tr.classList.add("estimated");
+        else tr.classList.add("completed");
+      }
 
       totalInitial += r.initial_price;
 
@@ -290,6 +281,44 @@ async function loadData() {
   `;
 
   tbody.appendChild(totalRow);
+}
+
+// ===== EXPORT =====
+function exportToExcel() {
+
+  let table = document.getElementById("table");
+  let data = [];
+
+  let headers = [];
+  table.querySelectorAll("thead th").forEach(th => headers.push(th.innerText));
+  data.push(headers);
+
+  table.querySelectorAll("tbody tr").forEach(tr => {
+    let row = [];
+    tr.querySelectorAll("td").forEach(td => row.push(td.innerText));
+    data.push(row);
+  });
+
+  let ws = XLSX.utils.aoa_to_sheet(data);
+
+  // AUTO WIDTH
+  ws["!cols"] = headers.map((_, i) => {
+    let max = headers[i].length;
+    data.forEach(row => {
+      let val = row[i] || "";
+      if (val.length > max) max = val.length;
+    });
+    return { wch: max + 2 };
+  });
+
+  // FREEZE HEADER
+  ws["!freeze"] = { xSplit: 0, ySplit: 1 };
+
+  let wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Report");
+
+  let today = new Date().toISOString().slice(0,10);
+  XLSX.writeFile(wb, `Shopee_Report_${today}.xlsx`);
 }
 </script>
 
