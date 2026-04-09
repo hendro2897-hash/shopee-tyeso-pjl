@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Shopee Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+
+  <style>
+    table { border-collapse: collapse; width: 100%; }
+    td, th { border: 1px solid #ccc; padding: 6px; }
+    .estimated { background-color: #fff3cd; }
+  </style>
+</head>
+
+<body>
+
+<h2>Shopee Dashboard</h2>
+
+<!-- Upload -->
+<input type="file" id="orderFile">
+<input type="file" id="incomeFile">
+
+<br><br>
+
+<!-- Filters -->
+<select id="statusFilter">
+  <option value="all">All</option>
+  <option value="Selesai">Completed</option>
+  <option value="pending">Pending</option>
+</select>
+
+<input type="date" id="startDate">
+<input type="date" id="endDate">
+
+<button onclick="loadData()">View Report</button>
+
+<hr>
+
+<table id="table">
+  <thead>
+    <tr>
+      <th>Order Date</th>
+      <th>Order No</th>
+      <th>Status</th>
+      <th>Product</th>
+      <th>Variant</th>
+      <th>SKU</th>
+      <th>Initial Price (Rp)</th>
+      <th>Deducted (Rp)</th>
+      <th>Shopee Fee (Rp)</th>
+      <th>Net Income (Rp)</th>
+    </tr>
+  </thead>
+  <tbody></tbody>
+</table>
+
+<script>
+const supabase = supabase.createClient(
+  "YOUR_SUPABASE_URL",
+  "YOUR_SUPABASE_KEY"
+);
+
+// ===== FEE FUNCTION =====
+function calculateFee(base) {
+  let admin = base * 0.117;
+  let payment = Math.min(base * 0.018, 50000);
+  let promo = Math.min(base * 0.045, 60000);
+  let processing = 1250;
+  return admin + payment + promo + processing;
+}
+
+// ===== UPLOAD ORDER FILE =====
+document.getElementById("orderFile").addEventListener("change", async (e) => {
+  const data = await e.target.files[0].arrayBuffer();
+  const wb = XLSX.read(data);
+  const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+
+  for (let r of rows) {
+    let order_id = r["No. Pesanan"];
+
+    let initial = (r["Harga Awal"] || 0) * (r["Jumlah"] || 1);
+
+    let deducted =
+      (r["Voucher disponsor oleh Penjual"] || 0) +
+      (r["Voucher co-fund disponsor oleh Penjual"] || 0) +
+      (r["Cashback Koin disponsori Penjual"] || 0) +
+      (r["Cashback Koin Co-fund disponsori Penjual"] || 0) +
+      (r["Promo Gratis Ongkir dari Penjual"] || 0);
+
+    let base = initial - deducted;
+    let fee = calculateFee(base);
+    let net = base - fee;
+
+    await supabase.from("orders").upsert({
+      order_id: order_id,
+      order_date: r["Waktu Pesanan Dibuat"],
+      status: r["Status Pesanan"],
+      product_name: r["Nama Produk"],
+      variant: r["Nama Variasi"],
+      sku: r["Nomor Referensi SKU"],
+      qty: r["Jumlah"],
+      initial_price: initial,
+      deducted: deducted,
+      shopee_fee: fee,
+      net_income: net,
+      is_estimated: true
+    });
+  }
+
+  alert("Order uploaded!");
+});
+
+// ===== UPLOAD INCOME FILE =====
+document.getElementById("incomeFile").addEventListener("change", async (e) => {
+  const data = await e.target.files[0].arrayBuffer();
+  const wb = XLSX.read(data);
+  const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+
+  for (let r of rows) {
+    await supabase
+      .from("orders")
+      .update({
+        shopee_fee: r["Biaya Administrasi"] || 0,
+        net_income: r["Dana Diterima"] || 0,
+        is_estimated: false
+      })
+      .eq("order_id", r["No. Pesanan"]);
+  }
+
+  alert("Income updated!");
+});
+
+// ===== LOAD DATA =====
+async function loadData() {
+  let { data } = await supabase.from("orders").select("*");
+
+  let tbody = document.querySelector("#table tbody");
+  tbody.innerHTML = "";
+
+  let grouped = {};
+  let countedOrders = new Set();
+
+  let totalInitial = 0;
+  let totalDeducted = 0;
+  let totalFee = 0;
+  let totalNet = 0;
+
+  data.forEach(row => {
+    if (!grouped[row.order_id]) grouped[row.order_id] = [];
+    grouped[row.order_id].push(row);
+  });
+
+  for (let order_id in grouped) {
+    let rows = grouped[order_id];
+
+    rows.forEach((r, i) => {
+      let tr = document.createElement("tr");
+
+      if (r.is_estimated) tr.classList.add("estimated");
+
+      // SUM logic
+      totalInitial += r.initial_price;
+
+      if (!countedOrders.has(order_id)) {
+        totalDeducted += r.deducted || 0;
+        totalFee += r.shopee_fee || 0;
+        totalNet += r.net_income || 0;
+        countedOrders.add(order_id);
+      }
+
+      tr.innerHTML = `
+        <td>${i==0 ? r.order_date : ""}</td>
+        <td>${i==0 ? r.order_id : ""}</td>
+        <td>${i==0 ? r.status : ""}</td>
+        <td>${r.product_name}</td>
+        <td>${r.variant}</td>
+        <td>${r.sku}</td>
+        <td>${r.initial_price}</td>
+        <td>${i==0 ? r.deducted : ""}</td>
+        <td>${i==0 ? r.shopee_fee : ""}</td>
+        <td>${i==0 ? r.net_income : ""}</td>
+      `;
+
+      tbody.appendChild(tr);
+    });
+  }
+
+  // ===== ADD TOTAL ROW =====
+  let totalRow = document.createElement("tr");
+  totalRow.style.fontWeight = "bold";
+  totalRow.style.background = "#e9ecef";
+
+  totalRow.innerHTML = `
+    <td colspan="6">TOTAL</td>
+    <td>${totalInitial}</td>
+    <td>${totalDeducted}</td>
+    <td>${totalFee}</td>
+    <td>${totalNet}</td>
+  `;
+
+  tbody.appendChild(totalRow);
+}
+  }
+}
+</script>
+
+</body>
+</html>
