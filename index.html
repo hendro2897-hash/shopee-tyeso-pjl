@@ -16,10 +16,17 @@
 
 <h2>Dashboard Penjualan Shopee Tyeso Medan</h2>
 
-<!-- Upload -->
-<input type="file" id="orderFile">
-<input type="file" id="incomeFile">
+<h3>Upload File</h3>
 
+<input type="file" id="fileInput">
+
+<br><br>
+
+<button onclick="uploadOrder()">Upload as Order Data</button>
+<button onclick="uploadIncome()">Upload as Income Data</button>
+
+<p id="message" style="color:red;"></p>  
+  
 <br><br>
 
 <!-- Filters -->
@@ -130,6 +137,89 @@ document.getElementById("incomeFile").addEventListener("change", async (e) => {
   alert("Income updated!");
 });
 
+async function uploadOrder() {
+  const file = document.getElementById("fileInput").files[0];
+  if (!file) return alert("Select file first");
+
+  const data = await file.arrayBuffer();
+  const wb = XLSX.read(data);
+  const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+
+  // VALIDATION
+  if (!rows[0]["Nama Produk"]) {
+    document.getElementById("message").innerText =
+      "❌ This is NOT a valid Order file!";
+    return;
+  }
+
+  document.getElementById("message").innerText = "";
+
+  for (let r of rows) {
+    let order_id = r["No. Pesanan"];
+
+    let initial = (r["Harga Awal"] || 0) * (r["Jumlah"] || 1);
+
+    let deducted =
+      (r["Voucher disponsor oleh Penjual"] || 0) +
+      (r["Voucher co-fund disponsor oleh Penjual"] || 0) +
+      (r["Cashback Koin disponsori Penjual"] || 0) +
+      (r["Cashback Koin Co-fund disponsori Penjual"] || 0) +
+      (r["Promo Gratis Ongkir dari Penjual"] || 0);
+
+    let base = initial - deducted;
+    let fee = calculateFee(base);
+    let net = base - fee;
+
+    await supabase.from("orders").upsert({
+      order_id: order_id,
+      order_date: r["Waktu Pesanan Dibuat"],
+      status: r["Status Pesanan"],
+      product_name: r["Nama Produk"],
+      variant: r["Nama Variasi"],
+      sku: r["Nomor Referensi SKU"],
+      qty: r["Jumlah"],
+      initial_price: initial,
+      deducted: deducted,
+      shopee_fee: fee,
+      net_income: net,
+      is_estimated: true
+    });
+  }
+
+  alert("✅ Order data uploaded!");
+}
+
+async function uploadIncome() {
+  const file = document.getElementById("fileInput").files[0];
+  if (!file) return alert("Select file first");
+
+  const data = await file.arrayBuffer();
+  const wb = XLSX.read(data);
+  const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+
+  // VALIDATION
+  if (!rows[0]["Dana Diterima"]) {
+    document.getElementById("message").innerText =
+      "❌ This is NOT a valid Income file!";
+    return;
+  }
+
+  document.getElementById("message").innerText = "";
+
+  for (let r of rows) {
+    await supabase
+      .from("orders")
+      .update({
+        shopee_fee: r["Biaya Administrasi (termasuk PPN 11%)"] || 0,
+        net_income: r["Dana Diterima"] || 0,
+        is_estimated: false
+      })
+      .eq("order_id", r["No. Pesanan"]);
+  }
+
+  alert("✅ Income data updated!");
+}  
+  
 // ===== LOAD DATA =====
 async function loadData() {
   let { data } = await supabase.from("orders").select("*");
