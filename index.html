@@ -70,10 +70,22 @@ const supabaseClient = createClient(
 
 // ===== NUMBER PARSER (IMPORTANT FIX) =====
 function parseNumber(val) {
-  if (!val) return 0;
-  val = val.toString();
-  val = val.replace(/\./g, ""); // remove thousand dot
-  val = val.replace(",", "."); // decimal comma → dot
+  if (val === null || val === undefined || val === "") return 0;
+
+  // ✅ If already number → return directly
+  if (typeof val === "number") return val;
+
+  // convert string
+  val = val.toString().trim();
+
+  // remove thousand separator
+  val = val.replace(/\./g, "");
+
+  // replace decimal comma
+  val = val.replace(",", ".");
+
+  val = val.replace(/,/g, "");
+  
   return parseFloat(val) || 0;
 }
 
