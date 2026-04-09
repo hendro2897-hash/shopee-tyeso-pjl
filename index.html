@@ -238,7 +238,19 @@ async function loadData() {
   // ===== RENDER =====
   for (let order_id in grouped) {
     let rows = grouped[order_id];
+// ===== GROUP CALCULATION =====
+let groupInitial = 0;
+let groupDeducted = 0;
+let groupFee = 0;
+let groupNet = 0;
 
+rows.forEach(r => {
+  groupInitial += r.initial_price || 0;
+  groupDeducted += r.deducted || 0;
+  groupFee += r.shopee_fee || 0;
+  groupNet += r.net_income || 0;
+});
+    
     rows.forEach((r, i) => {
       let tr = document.createElement("tr");
 
@@ -266,8 +278,8 @@ async function loadData() {
         <td>${r.sku}</td>
         <td>${formatNumber(r.initial_price)}</td>
         <td>${i==0 && r.status !== "Cancel" ? formatNumber(r.deducted) : ""}</td>
-        <td>${i==0 && r.status !== "Cancel" ? formatNumber(r.shopee_fee) : ""}</td>
-        <td>${i==0 && r.status !== "Cancel" ? formatNumber(r.net_income) : ""}</td>
+        <td>${i==0 && r.status !== "Cancel" ? formatNumber(r.groupFee) : ""}</td>
+        <td>${i==0 && r.status !== "Cancel" ? formatNumber(groupNet) : ""}</td>
       `;
 
       tbody.appendChild(tr);
