@@ -135,19 +135,21 @@ async function uploadOrder() {
       let net = base - fee;
 
       await supabaseClient.from("orders").upsert({
-        order_id: r["No. Pesanan"],
-        order_date: r["Waktu Pesanan Dibuat"],
-        status,
-        product_name: r["Nama Produk"],
-        variant: r["Nama Variasi"],
-        sku: r["Nomor Referensi SKU"],
-        qty,
-        initial_price: initial,
-        deducted,
-        shopee_fee: fee,
-        net_income: net,
-        is_estimated: true
-      });
+  order_id: r["No. Pesanan"],
+  order_date: r["Waktu Pesanan Dibuat"],
+  status,
+  product_name: r["Nama Produk"],
+  variant: r["Nama Variasi"],
+  sku: r["Nomor Referensi SKU"],
+  qty,
+  initial_price: initial,
+  deducted,
+  shopee_fee: fee,
+  net_income: net,
+  is_estimated: true
+}, {
+  onConflict: ["order_id", "product_name", "variant", "sku"]
+});
     }
 
     alert("✅ Order upload success!");
@@ -173,15 +175,19 @@ async function uploadIncome() {
     }
 
     for (let r of rows) {
-      await supabaseClient
-        .from("orders")
-        .update({
-          shopee_fee: parseNumber(r["Biaya Administrasi (termasuk PPN 11%)"]),
-          net_income: parseNumber(r["Dana Diterima"]),
-          is_estimated: false
-        })
-        .eq("order_id", r["No. Pesanan"]);
-    }
+
+  // ===== STATUS LOGIC (PUT HERE) =====
+  let status = r["Status Pesanan"];
+  let cancelStatus = r["Status Pembatalan/ Pengembalian"];
+
+  if (status === "Selesai" && cancelStatus) {
+    status = "Cancel";
+  }
+
+  // ===== CONTINUE NORMAL PROCESS =====
+  let price = parseNumber(r["Harga Awal"]);
+  let qty = parseNumber(r["Jumlah"]);
+  let initial = price * qty;
 
     alert("✅ Income updated!");
     loadData();
