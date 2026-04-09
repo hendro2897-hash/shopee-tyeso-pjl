@@ -200,22 +200,33 @@ async function loadData() {
 
   let query = supabaseClient.from("orders").select("*");
 
+  // ===== STATUS FILTER (FIXED) =====
   if (statusFilter === "Selesai") {
     query = query.eq("status", "Selesai");
   }
 
   if (statusFilter === "pending") {
-    query = query.not("status", "in", "(Selesai,Cancel)");
+    query = query.neq("status", "Selesai").neq("status", "Cancel");
   }
 
   if (statusFilter === "Cancel") {
     query = query.eq("status", "Cancel");
   }
 
+  // ===== DATE FILTER =====
   if (startDate) query = query.gte("order_date", startDate);
   if (endDate) query = query.lte("order_date", endDate);
 
-  let { data } = await query;
+  // ===== SAFE FETCH (FIXED) =====
+  let { data, error } = await query;
+
+  if (error) {
+    console.error(error);
+    alert("Error loading data: " + error.message);
+    return;
+  }
+
+  if (!data) data = [];
 
   let tbody = document.querySelector("#table tbody");
   tbody.innerHTML = "";
