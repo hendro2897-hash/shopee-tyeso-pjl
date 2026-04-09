@@ -112,6 +112,7 @@ async function uploadOrder() {
 
     for (let r of rows) {
 
+      // ===== STATUS LOGIC =====
       let status = r["Status Pesanan"];
       let cancelStatus = r["Status Pembatalan/ Pengembalian"];
 
@@ -135,27 +136,28 @@ async function uploadOrder() {
       let net = base - fee;
 
       await supabaseClient.from("orders").upsert({
-  order_id: r["No. Pesanan"],
-  order_date: r["Waktu Pesanan Dibuat"],
-  status,
-  product_name: r["Nama Produk"],
-  variant: r["Nama Variasi"],
-  sku: r["Nomor Referensi SKU"],
-  qty,
-  initial_price: initial,
-  deducted,
-  shopee_fee: fee,
-  net_income: net,
-  is_estimated: true
-}, {
-  onConflict: ["order_id", "product_name", "variant", "sku"]
-});
-    }
+        order_id: r["No. Pesanan"],
+        order_date: r["Waktu Pesanan Dibuat"],
+        status,
+        product_name: r["Nama Produk"],
+        variant: r["Nama Variasi"],
+        sku: r["Nomor Referensi SKU"],
+        qty,
+        initial_price: initial,
+        deducted,
+        shopee_fee: fee,
+        net_income: net,
+        is_estimated: true
+      }, {
+        onConflict: ["order_id", "product_name", "variant", "sku"]
+      });
+
+    } // ✅ CLOSE LOOP
 
     alert("✅ Order upload success!");
     loadData();
 
-  } catch (err) {
+  } catch (err) { // ✅ catch now valid
     alert(err.message);
   }
 }
