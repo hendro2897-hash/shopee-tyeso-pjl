@@ -200,6 +200,12 @@ async function loadData() {
 
   let query = supabaseClient.from("orders").select("*");
 
+  // ===== DATE VALIDATION =====
+if (!startDate || !endDate) {
+  alert("⚠️ Please select start date and end date first");
+  return;
+}
+  
   // ===== STATUS FILTER (FIXED) =====
   if (statusFilter === "Selesai") {
     query = query.eq("status", "Selesai");
