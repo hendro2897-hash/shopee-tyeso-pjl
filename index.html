@@ -2,6 +2,7 @@
 <html>
 <head>
   <title>Dashboard Penjualan Shopee Tyeso Medan</title>
+
   <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
 
@@ -19,17 +20,15 @@
 <h3>Upload File</h3>
 
 <input type="file" id="fileInput">
-
 <br><br>
 
 <button onclick="uploadOrder()">Upload as Order Data</button>
 <button onclick="uploadIncome()">Upload as Income Data</button>
 
-<p id="message" style="color:red;"></p>  
-  
+<p id="message" style="color:red;"></p>
+
 <br><br>
 
-<!-- Filters -->
 <select id="statusFilter">
   <option value="all">All</option>
   <option value="Selesai">Completed</option>
@@ -62,9 +61,11 @@
 </table>
 
 <script>
-const supabase = supabase.createClient(
+const { createClient } = supabase;
+
+const supabaseClient = createClient(
   "https://tndkvtyvfppowqxphnxv.supabase.co",
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRuZGt2dHl2ZnBwb3dxeHBobnh2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3MDE3MTMsImV4cCI6MjA5MTI3NzcxM30.wy8qeC3iQHSMmD7Au7IKmqhO3Mv7iZmX6IOpPE7JpBc"
+  "YOUR_ANON_KEY_HERE"
 );
 
 // ===== FEE FUNCTION =====
@@ -76,159 +77,104 @@ function calculateFee(base) {
   return admin + payment + promo + processing;
 }
 
-// ===== UPLOAD ORDER FILE =====
-document.getElementById("orderFile").addEventListener("change", async (e) => {
-  const data = await e.target.files[0].arrayBuffer();
-  const wb = XLSX.read(data);
-  const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
-
-  for (let r of rows) {
-    let order_id = r["No. Pesanan"];
-
-    let initial = (r["Harga Awal"] || 0) * (r["Jumlah"] || 1);
-
-    let deducted =
-      (r["Voucher disponsor oleh Penjual"] || 0) +
-      (r["Voucher co-fund disponsor oleh Penjual"] || 0) +
-      (r["Cashback Koin disponsori Penjual"] || 0) +
-      (r["Cashback Koin Co-fund disponsori Penjual"] || 0) +
-      (r["Promo Gratis Ongkir dari Penjual"] || 0);
-
-    let base = initial - deducted;
-    let fee = calculateFee(base);
-    let net = base - fee;
-
-    await supabase.from("orders").upsert({
-      order_id: order_id,
-      order_date: r["Waktu Pesanan Dibuat"],
-      status: r["Status Pesanan"],
-      product_name: r["Nama Produk"],
-      variant: r["Nama Variasi"],
-      sku: r["Nomor Referensi SKU"],
-      qty: r["Jumlah"],
-      initial_price: initial,
-      deducted: deducted,
-      shopee_fee: fee,
-      net_income: net,
-      is_estimated: true
-    });
-  }
-
-  alert("Order uploaded!");
-});
-
-// ===== UPLOAD INCOME FILE =====
-document.getElementById("incomeFile").addEventListener("change", async (e) => {
-  const data = await e.target.files[0].arrayBuffer();
-  const wb = XLSX.read(data);
-  const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
-
-  for (let r of rows) {
-    await supabase
-      .from("orders")
-      .update({
-        shopee_fee: r["Biaya Administrasi"] || 0,
-        net_income: r["Dana Diterima"] || 0,
-        is_estimated: false
-      })
-      .eq("order_id", r["No. Pesanan"]);
-  }
-
-  alert("Income updated!");
-});
-
+// ===== UPLOAD ORDER =====
 async function uploadOrder() {
-  const file = document.getElementById("fileInput").files[0];
-  if (!file) return alert("Select file first");
+  try {
+    const file = document.getElementById("fileInput").files[0];
+    if (!file) return alert("Select file first");
 
-  const data = await file.arrayBuffer();
-  const wb = XLSX.read(data);
-  const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+    const data = await file.arrayBuffer();
+    const wb = XLSX.read(data);
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
 
-  // VALIDATION
-  if (!rows[0]["Nama Produk"]) {
-    document.getElementById("message").innerText =
-      "❌ This is NOT a valid Order file!";
-    return;
+    if (!rows[0]["Nama Produk"]) {
+      alert("❌ Not a valid Order file!");
+      return;
+    }
+
+    for (let r of rows) {
+      let order_id = r["No. Pesanan"];
+
+      let initial = (r["Harga Awal"] || 0) * (r["Jumlah"] || 1);
+
+      let deducted =
+        (r["Voucher disponsor oleh Penjual"] || 0) +
+        (r["Voucher co-fund disponsor oleh Penjual"] || 0) +
+        (r["Cashback Koin disponsori Penjual"] || 0) +
+        (r["Cashback Koin Co-fund disponsori Penjual"] || 0) +
+        (r["Promo Gratis Ongkir dari Penjual"] || 0);
+
+      let base = initial - deducted;
+      let fee = calculateFee(base);
+      let net = base - fee;
+
+      await supabaseClient.from("orders").upsert({
+        order_id,
+        order_date: r["Waktu Pesanan Dibuat"],
+        status: r["Status Pesanan"],
+        product_name: r["Nama Produk"],
+        variant: r["Nama Variasi"],
+        sku: r["Nomor Referensi SKU"],
+        qty: r["Jumlah"],
+        initial_price: initial,
+        deducted,
+        shopee_fee: fee,
+        net_income: net,
+        is_estimated: true
+      });
+    }
+
+    alert("✅ Order upload success!");
+    loadData();
+
+  } catch (err) {
+    alert("Error: " + err.message);
   }
-
-  document.getElementById("message").innerText = "";
-
-  for (let r of rows) {
-    let order_id = r["No. Pesanan"];
-
-    let initial = (r["Harga Awal"] || 0) * (r["Jumlah"] || 1);
-
-    let deducted =
-      (r["Voucher disponsor oleh Penjual"] || 0) +
-      (r["Voucher co-fund disponsor oleh Penjual"] || 0) +
-      (r["Cashback Koin disponsori Penjual"] || 0) +
-      (r["Cashback Koin Co-fund disponsori Penjual"] || 0) +
-      (r["Promo Gratis Ongkir dari Penjual"] || 0);
-
-    let base = initial - deducted;
-    let fee = calculateFee(base);
-    let net = base - fee;
-
-    await supabase.from("orders").upsert({
-      order_id: order_id,
-      order_date: r["Waktu Pesanan Dibuat"],
-      status: r["Status Pesanan"],
-      product_name: r["Nama Produk"],
-      variant: r["Nama Variasi"],
-      sku: r["Nomor Referensi SKU"],
-      qty: r["Jumlah"],
-      initial_price: initial,
-      deducted: deducted,
-      shopee_fee: fee,
-      net_income: net,
-      is_estimated: true
-    });
-  }
-
-  alert("✅ Order data uploaded!");
 }
 
+// ===== UPLOAD INCOME =====
 async function uploadIncome() {
-  const file = document.getElementById("fileInput").files[0];
-  if (!file) return alert("Select file first");
+  try {
+    const file = document.getElementById("fileInput").files[0];
+    if (!file) return alert("Select file first");
 
-  const data = await file.arrayBuffer();
-  const wb = XLSX.read(data);
-  const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+    const data = await file.arrayBuffer();
+    const wb = XLSX.read(data);
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
 
-  // VALIDATION
-  if (!rows[0]["Dana Diterima"]) {
-    document.getElementById("message").innerText =
-      "❌ This is NOT a valid Income file!";
-    return;
+    if (!rows[0]["Dana Diterima"]) {
+      alert("❌ Not a valid Income file!");
+      return;
+    }
+
+    for (let r of rows) {
+      await supabaseClient
+        .from("orders")
+        .update({
+          shopee_fee: r["Biaya Administrasi (termasuk PPN 11%)"] || 0,
+          net_income: r["Dana Diterima"] || 0,
+          is_estimated: false
+        })
+        .eq("order_id", r["No. Pesanan"]);
+    }
+
+    alert("✅ Income updated!");
+    loadData();
+
+  } catch (err) {
+    alert("Error: " + err.message);
   }
+}
 
-  document.getElementById("message").innerText = "";
-
-  for (let r of rows) {
-    await supabase
-      .from("orders")
-      .update({
-        shopee_fee: r["Biaya Administrasi (termasuk PPN 11%)"] || 0,
-        net_income: r["Dana Diterima"] || 0,
-        is_estimated: false
-      })
-      .eq("order_id", r["No. Pesanan"]);
-  }
-
-  alert("✅ Income data updated!");
-}  
-  
 // ===== LOAD DATA =====
 async function loadData() {
-  let { data } = await supabase.from("orders").select("*");
+  let { data } = await supabaseClient.from("orders").select("*");
 
   let tbody = document.querySelector("#table tbody");
   tbody.innerHTML = "";
 
   let grouped = {};
-  let countedOrders = new Set();
+  let counted = new Set();
 
   let totalInitial = 0;
   let totalDeducted = 0;
@@ -248,14 +194,13 @@ async function loadData() {
 
       if (r.is_estimated) tr.classList.add("estimated");
 
-      // SUM logic
       totalInitial += r.initial_price;
 
-      if (!countedOrders.has(order_id)) {
+      if (!counted.has(order_id)) {
         totalDeducted += r.deducted || 0;
         totalFee += r.shopee_fee || 0;
         totalNet += r.net_income || 0;
-        countedOrders.add(order_id);
+        counted.add(order_id);
       }
 
       tr.innerHTML = `
@@ -275,7 +220,6 @@ async function loadData() {
     });
   }
 
-  // ===== ADD TOTAL ROW =====
   let totalRow = document.createElement("tr");
   totalRow.style.fontWeight = "bold";
   totalRow.style.background = "#e9ecef";
@@ -289,8 +233,6 @@ async function loadData() {
   `;
 
   tbody.appendChild(totalRow);
-}
-  }
 }
 </script>
 
