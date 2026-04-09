@@ -33,6 +33,7 @@
   <option value="all">All</option>
   <option value="Selesai">Completed</option>
   <option value="pending">Pending</option>
+  <option value="Cancel">Cancel</option>
 </select>
 
 <input type="date" id="startDate">
@@ -68,24 +69,15 @@ const supabaseClient = createClient(
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRuZGt2dHl2ZnBwb3dxeHBobnh2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3MDE3MTMsImV4cCI6MjA5MTI3NzcxM30.wy8qeC3iQHSMmD7Au7IKmqhO3Mv7iZmX6IOpPE7JpBc"
 );
 
-// ===== NUMBER PARSER (IMPORTANT FIX) =====
+// ===== PARSE NUMBER =====
 function parseNumber(val) {
   if (val === null || val === undefined || val === "") return 0;
-
-  // ✅ If already number → return directly
   if (typeof val === "number") return val;
 
-  // convert string
   val = val.toString().trim();
-
-  // remove thousand separator
   val = val.replace(/\./g, "");
-
-  // replace decimal comma
   val = val.replace(",", ".");
 
-  val = val.replace(/,/g, "");
-  
   return parseFloat(val) || 0;
 }
 
@@ -94,7 +86,7 @@ function formatNumber(num) {
   return (num || 0).toLocaleString("id-ID");
 }
 
-// ===== FEE FUNCTION =====
+// ===== FEE =====
 function calculateFee(base) {
   let admin = base * 0.117;
   let payment = Math.min(base * 0.018, 50000);
@@ -121,6 +113,14 @@ async function uploadOrder() {
     for (let r of rows) {
       let order_id = r["No. Pesanan"];
 
+      // ===== STATUS LOGIC (IMPORTANT) =====
+      let status = r["Status Pesanan"];
+      let cancelStatus = r["Status Pembatalan/ Pengembalian"];
+
+      if (status === "Selesai" && cancelStatus) {
+        status = "Cancel";
+      }
+
       let price = parseNumber(r["Harga Awal"]);
       let qty = parseNumber(r["Jumlah"]);
       let initial = price * qty;
@@ -139,7 +139,7 @@ async function uploadOrder() {
       await supabaseClient.from("orders").upsert({
         order_id,
         order_date: r["Waktu Pesanan Dibuat"],
-        status: r["Status Pesanan"],
+        status,
         product_name: r["Nama Produk"],
         variant: r["Nama Variasi"],
         sku: r["Nomor Referensi SKU"],
@@ -194,9 +194,38 @@ async function uploadIncome() {
   }
 }
 
-// ===== LOAD DATA =====
+// ===== LOAD DATA WITH FILTER =====
 async function loadData() {
-  let { data } = await supabaseClient.from("orders").select("*");
+
+  let statusFilter = document.getElementById("statusFilter").value;
+  let startDate = document.getElementById("startDate").value;
+  let endDate = document.getElementById("endDate").value;
+
+  let query = supabaseClient.from("orders").select("*");
+
+  // ===== STATUS FILTER =====
+  if (statusFilter === "Selesai") {
+    query = query.eq("status", "Selesai");
+  }
+
+  if (statusFilter === "pending") {
+    query = query.not("status", "in", "(Selesai,Cancel)");
+  }
+
+  if (statusFilter === "Cancel") {
+    query = query.eq("status", "Cancel");
+  }
+
+  // ===== DATE FILTER =====
+  if (startDate) {
+    query = query.gte("order_date", startDate);
+  }
+
+  if (endDate) {
+    query = query.lte("order_date", endDate);
+  }
+
+  let { data } = await query;
 
   let tbody = document.querySelector("#table tbody");
   tbody.innerHTML = "";
@@ -239,9 +268,9 @@ async function loadData() {
         <td>${r.variant}</td>
         <td>${r.sku}</td>
         <td>${formatNumber(r.initial_price)}</td>
-        <td>${i==0 ? formatNumber(r.deducted) : ""}</td>
-        <td>${i==0 ? formatNumber(r.shopee_fee) : ""}</td>
-        <td>${i==0 ? formatNumber(r.net_income) : ""}</td>
+        <td>${i==0 && r.status !== "Cancel" ? formatNumber(r.deducted) : ""}</td>
+        <td>${i==0 && r.status !== "Cancel" ? formatNumber(r.shopee_fee) : ""}</td>
+        <td>${i==0 && r.status !== "Cancel" ? formatNumber(r.net_income) : ""}</td>
       `;
 
       tbody.appendChild(tr);
