@@ -5,12 +5,20 @@
 
   <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
   <style>
     table { border-collapse: collapse; width: 100%; }
     td, th { border: 1px solid #ccc; padding: 6px; }
     .estimated { background-color: #fff3cd; }
     .completed { background-color: #d4edda; }
+
+    button.icon {
+      font-size: 18px;
+      padding: 6px 10px;
+      margin-left: 5px;
+      cursor: pointer;
+    }
   </style>
 </head>
 
@@ -23,8 +31,8 @@
 <input type="file" id="fileInput">
 <br><br>
 
-<button onclick="uploadOrder()">Upload as Order Data</button>
-<button onclick="uploadIncome()">Upload as Income Data</button>
+<button onclick="uploadOrder()">Upload Order</button>
+<button onclick="uploadIncome()">Upload Income</button>
 
 <p id="message" style="color:red;"></p>
 
@@ -41,7 +49,10 @@
 <input type="date" id="endDate">
 
 <button onclick="loadData()">View Report</button>
-<button onclick="exportToExcel()">Export to Excel</button>
+
+<!-- ICON BUTTONS -->
+<button class="icon" onclick="exportToExcel()">📊</button>
+<button class="icon" onclick="exportToPDF()">📄</button>
 
 <hr>
 
@@ -68,32 +79,28 @@ const { createClient } = supabase;
 
 const supabaseClient = createClient(
   "https://tndkvtyvfppowqxphnxv.supabase.co",
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRuZGt2dHl2ZnBwb3dxeHBobnh2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3MDE3MTMsImV4cCI6MjA5MTI3NzcxM30.wy8qeC3iQHSMmD7Au7IKmqhO3Mv7iZmX6IOpPE7JpBc"
+  "YOUR_ANON_KEY_HERE"
 );
 
 // ===== PARSE NUMBER =====
 function parseNumber(val) {
   if (!val) return 0;
   if (typeof val === "number") return val;
-
-  val = val.toString().trim();
-  val = val.replace(/\./g, "");
-  val = val.replace(",", ".");
+  val = val.toString().replace(/\./g, "").replace(",", ".");
   return parseFloat(val) || 0;
 }
 
-// ===== FORMAT NUMBER =====
+// ===== FORMAT =====
 function formatNumber(num) {
   return (num || 0).toLocaleString("id-ID");
 }
 
 // ===== FEE =====
 function calculateFee(base) {
-  let admin = base * 0.117;
-  let payment = Math.min(base * 0.018, 50000);
-  let promo = Math.min(base * 0.045, 60000);
-  let processing = 1250;
-  return admin + payment + promo + processing;
+  return base * 0.117 +
+         Math.min(base * 0.018, 50000) +
+         Math.min(base * 0.045, 60000) +
+         1250;
 }
 
 // ===== UPLOAD ORDER =====
@@ -105,24 +112,13 @@ async function uploadOrder() {
     const wb = XLSX.read(await file.arrayBuffer());
     const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
 
-    if (!rows[0]["Nama Produk"]) {
-      alert("❌ Not a valid Order file!");
-      return;
-    }
-
     for (let r of rows) {
 
-      // ===== STATUS LOGIC =====
       let status = r["Status Pesanan"];
       let cancelStatus = r["Status Pembatalan/ Pengembalian"];
+      if (status === "Selesai" && cancelStatus) status = "Cancel";
 
-      if (status === "Selesai" && cancelStatus) {
-        status = "Cancel";
-      }
-
-      let price = parseNumber(r["Harga Awal"]);
-      let qty = parseNumber(r["Jumlah"]);
-      let initial = price * qty;
+      let initial = parseNumber(r["Harga Awal"]) * parseNumber(r["Jumlah"]);
 
       let deducted =
         parseNumber(r["Voucher disponsor oleh Penjual"]) +
@@ -133,7 +129,6 @@ async function uploadOrder() {
 
       let base = initial - deducted;
       let fee = calculateFee(base);
-      let net = base - fee;
 
       await supabaseClient.from("orders").upsert({
         order_id: r["No. Pesanan"],
@@ -142,27 +137,25 @@ async function uploadOrder() {
         product_name: r["Nama Produk"],
         variant: r["Nama Variasi"],
         sku: r["Nomor Referensi SKU"],
-        qty,
         initial_price: initial,
         deducted,
         shopee_fee: fee,
-        net_income: net,
+        net_income: base - fee,
         is_estimated: true
       }, {
         onConflict: ["order_id", "product_name", "variant", "sku"]
       });
+    }
 
-    } // ✅ CLOSE LOOP
-
-    alert("✅ Order upload success!");
+    alert("✅ Order uploaded");
     loadData();
 
-  } catch (err) { // ✅ catch now valid
+  } catch (err) {
     alert(err.message);
   }
 }
 
-// ===== UPLOAD INCOME =====
+// ===== UPLOAD INCOME (FIXED) =====
 async function uploadIncome() {
   try {
     const file = document.getElementById("fileInput").files[0];
@@ -171,27 +164,18 @@ async function uploadIncome() {
     const wb = XLSX.read(await file.arrayBuffer());
     const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
 
-    if (!rows[0]["Dana Diterima"]) {
-      alert("❌ Not a valid Income file!");
-      return;
+    for (let r of rows) {
+      await supabaseClient
+        .from("orders")
+        .update({
+          shopee_fee: parseNumber(r["Biaya Administrasi (termasuk PPN 11%)"]),
+          net_income: parseNumber(r["Dana Diterima"]),
+          is_estimated: false
+        })
+        .eq("order_id", r["No. Pesanan"]);
     }
 
-    for (let r of rows) {
-
-  // ===== STATUS LOGIC (PUT HERE) =====
-  let status = r["Status Pesanan"];
-  let cancelStatus = r["Status Pembatalan/ Pengembalian"];
-
-  if (status === "Selesai" && cancelStatus) {
-    status = "Cancel";
-  }
-
-  // ===== CONTINUE NORMAL PROCESS =====
-  let price = parseNumber(r["Harga Awal"]);
-  let qty = parseNumber(r["Jumlah"]);
-  let initial = price * qty;
-
-    alert("✅ Income updated!");
+    alert("✅ Income updated");
     loadData();
 
   } catch (err) {
@@ -202,148 +186,65 @@ async function uploadIncome() {
 // ===== LOAD DATA =====
 async function loadData() {
 
-  let statusFilter = document.getElementById("statusFilter").value;
   let startDate = document.getElementById("startDate").value;
   let endDate = document.getElementById("endDate").value;
 
-  let query = supabaseClient.from("orders").select("*");
-
-  // ===== DATE VALIDATION =====
-if (!startDate || !endDate) {
-  alert("⚠️ Please select start date and end date first");
-  return;
-}
-  
-  // ===== STATUS FILTER (FIXED) =====
-  if (statusFilter === "Selesai") {
-    query = query.eq("status", "Selesai");
-  }
-
-  if (statusFilter === "pending") {
-    query = query.neq("status", "Selesai").neq("status", "Cancel");
-  }
-
-  if (statusFilter === "Cancel") {
-    query = query.eq("status", "Cancel");
-  }
-
-  // ===== DATE FILTER =====
-  if (startDate) query = query.gte("order_date", startDate);
-  if (endDate) query = query.lte("order_date", endDate);
-
-  // ===== SAFE FETCH (FIXED) =====
-  let { data, error } = await query;
-
-  if (error) {
-    console.error(error);
-    alert("Error loading data: " + error.message);
+  if (!startDate || !endDate) {
+    alert("Select date first");
     return;
   }
 
-  if (!data) data = [];
+  let { data } = await supabaseClient.from("orders").select("*");
 
   let tbody = document.querySelector("#table tbody");
   tbody.innerHTML = "";
 
-  let grouped = {};
-  let counted = new Set();
+  data.forEach(r => {
+    let tr = document.createElement("tr");
 
-  let totalInitial = 0, totalDeducted = 0, totalFee = 0, totalNet = 0;
+    if (r.is_estimated) tr.classList.add("estimated");
+    else tr.classList.add("completed");
 
-  data.forEach(row => {
-    if (!grouped[row.order_id]) grouped[row.order_id] = [];
-    grouped[row.order_id].push(row);
+    tr.innerHTML = `
+      <td>${r.order_date}</td>
+      <td>${r.order_id}</td>
+      <td>${r.status}</td>
+      <td>${r.product_name}</td>
+      <td>${r.variant}</td>
+      <td>${r.sku}</td>
+      <td>${formatNumber(r.initial_price)}</td>
+      <td>${formatNumber(r.deducted)}</td>
+      <td>${formatNumber(r.shopee_fee)}</td>
+      <td>${formatNumber(r.net_income)}</td>
+    `;
+
+    tbody.appendChild(tr);
   });
-
-  for (let order_id in grouped) {
-    let rows = grouped[order_id];
-
-    rows.forEach((r, i) => {
-      let tr = document.createElement("tr");
-
-      // COLOR LOGIC
-      if (r.status !== "Cancel") {
-        if (r.is_estimated) tr.classList.add("estimated");
-        else tr.classList.add("completed");
-      }
-
-      totalInitial += r.initial_price;
-
-      if (!counted.has(order_id)) {
-        totalDeducted += r.deducted || 0;
-        totalFee += r.shopee_fee || 0;
-        totalNet += r.net_income || 0;
-        counted.add(order_id);
-      }
-
-      tr.innerHTML = `
-        <td>${i==0 ? r.order_date : ""}</td>
-        <td>${i==0 ? r.order_id : ""}</td>
-        <td>${i==0 ? r.status : ""}</td>
-        <td>${r.product_name}</td>
-        <td>${r.variant}</td>
-        <td>${r.sku}</td>
-        <td>${formatNumber(r.initial_price)}</td>
-        <td>${i==0 && r.status !== "Cancel" ? formatNumber(r.deducted) : ""}</td>
-        <td>${i==0 && r.status !== "Cancel" ? formatNumber(r.shopee_fee) : ""}</td>
-        <td>${i==0 && r.status !== "Cancel" ? formatNumber(r.net_income) : ""}</td>
-      `;
-
-      tbody.appendChild(tr);
-    });
-  }
-
-  let totalRow = document.createElement("tr");
-  totalRow.style.fontWeight = "bold";
-  totalRow.style.background = "#e9ecef";
-
-  totalRow.innerHTML = `
-    <td colspan="6">TOTAL</td>
-    <td>${formatNumber(totalInitial)}</td>
-    <td>${formatNumber(totalDeducted)}</td>
-    <td>${formatNumber(totalFee)}</td>
-    <td>${formatNumber(totalNet)}</td>
-  `;
-
-  tbody.appendChild(totalRow);
 }
 
-// ===== EXPORT =====
+// ===== EXPORT EXCEL =====
 function exportToExcel() {
+  let wb = XLSX.utils.table_to_book(document.getElementById("table"));
+  XLSX.writeFile(wb, "Shopee.xlsx");
+}
 
-  let table = document.getElementById("table");
-  let data = [];
+// ===== EXPORT PDF =====
+function exportToPDF() {
+  const { jsPDF } = window.jspdf;
+  let doc = new jsPDF();
 
-  let headers = [];
-  table.querySelectorAll("thead th").forEach(th => headers.push(th.innerText));
-  data.push(headers);
+  doc.text("Shopee Report", 10, 10);
 
-  table.querySelectorAll("tbody tr").forEach(tr => {
-    let row = [];
-    tr.querySelectorAll("td").forEach(td => row.push(td.innerText));
-    data.push(row);
+  let rows = document.querySelectorAll("#table tbody tr");
+  let y = 20;
+
+  rows.forEach(r => {
+    let text = Array.from(r.children).map(td => td.innerText).join(" | ");
+    doc.text(text, 10, y);
+    y += 7;
   });
 
-  let ws = XLSX.utils.aoa_to_sheet(data);
-
-  // AUTO WIDTH
-  ws["!cols"] = headers.map((_, i) => {
-    let max = headers[i].length;
-    data.forEach(row => {
-      let val = row[i] || "";
-      if (val.length > max) max = val.length;
-    });
-    return { wch: max + 2 };
-  });
-
-  // FREEZE HEADER
-  ws["!freeze"] = { xSplit: 0, ySplit: 1 };
-
-  let wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "Report");
-
-  let today = new Date().toISOString().slice(0,10);
-  XLSX.writeFile(wb, `Shopee_Report_${today}.xlsx`);
+  doc.save("Shopee.pdf");
 }
 </script>
 
